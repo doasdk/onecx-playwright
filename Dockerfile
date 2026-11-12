@@ -4,7 +4,7 @@ FROM mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76c
 
 LABEL org.opencontainers.image.title="OneCX Playwright runtime" \
       org.opencontainers.image.description="Shared browser runtime; application lockfiles own test dependencies and authentication fixtures" \
-      org.opencontainers.image.version="0.2.0" \
+      org.opencontainers.image.version="0.0.2" \
       org.onecx.playwright.contract="1"
 
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node

@@ -1,6 +1,6 @@
 # OneCX Playwright runtime
 
-A thin shared base image for OneCX app-specific E2E images. Version 0.2.0
+A thin shared base image for OneCX app-specific E2E images. Version 0.0.2
 provides Playwright 1.64.0 browsers and OS dependencies on Ubuntu Noble,
 Node 22.22.0, npm, and an inherited test launcher. The initial supported image
 platform is Linux amd64.
@@ -183,8 +183,8 @@ sh tests/launcher.sh
 The smoke consumer uses its own lockfile and launches Chromium, Firefox, and
 WebKit without external app services. The GitHub workflow validates before
 publishing to `ghcr.io/<repository-owner>/<repository-name>`. PRs only build/test;
-main publishes a moving development tag and SHA tag. A `v0.2.0` tag publishes
-`0.2.0`, without a `latest` tag. Configure package access so consuming CI can pull
+main publishes a moving development tag and SHA tag. A `v0.0.2` tag publishes
+`0.0.2`, without a `latest` tag. Configure package access so consuming CI can pull
 it; do not use the moving main tag for reproducible matrix runs.
 
 Runtime upgrades require updating the upstream Playwright tag and digest,
@@ -197,7 +197,7 @@ This repository does not automatically migrate or publish consuming app images.
 Shared layers and build caches may speed builds/pulls across app repositories;
 test execution and login speed are unchanged.
 
-### Release 0.2.0 (unpublished)
+### Release 0.0.2 (unpublished)
 
 Introduces contract label v1, the shared Node launcher, runtime envelope
 validation, config confinement, CA/output validation, signal forwarding, and
