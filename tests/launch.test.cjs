@@ -56,6 +56,30 @@ afterEach(() => {
   for (const root of directories.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
+// Image defaults such as /e2e-results are absolute and may be unavailable or
+// unwritable on the host, so redirect them to a temporary directory.
+async function withImagePath(imagePath, hostPath, action) {
+  const image = path.resolve(imagePath);
+  const map = (value) => {
+    if (typeof value !== "string") return value;
+    const resolved = path.resolve(value);
+    if (resolved === image) return hostPath;
+    return resolved.startsWith(image + path.sep) ?
+      path.join(hostPath, resolved.slice(image.length + 1)) : value;
+  };
+  const names = ["realpathSync", "statSync", "existsSync", "mkdirSync",
+    "openSync", "unlinkSync", "accessSync"];
+  const originals = names.map((name) => fs[name]);
+  names.forEach((name, index) => {
+    fs[name] = (value, ...rest) => originals[index](map(value), ...rest);
+  });
+  try {
+    return await action();
+  } finally {
+    names.forEach((name, index) => { fs[name] = originals[index]; });
+  }
+}
+
 test("should launch the standalone script with detected JS config and unchanged arguments", async () => {
   const application = app();
   const result = await run(application, { args: ["ignored", "--project=chromium"],
@@ -405,24 +429,29 @@ test("should forward a real signal to the spawned npm process group", async () =
   }
 });
 
-test("should use the image test root when TEST_ROOT is absent", () => {
-  assert.throws(() => configuration({ OUTPUT_DIR: "/e2e-results" }, []),
-    /Playwright config is missing/);
+test("should use the image test root when TEST_ROOT is absent", async () => {
+  const emptyRoot = fs.mkdtempSync(path.join(__dirname, ".launch-test-"));
+  directories.push(emptyRoot);
+  await withImagePath("/app/integration", emptyRoot, () => {
+    assert.throws(() => configuration({ OUTPUT_DIR: "/e2e-results" }, []),
+      /Playwright config is missing/);
+  });
 });
 
 test("should use the image artifact directory when OUTPUT_DIR is absent", async () => {
   const application = app();
   delete application.env.OUTPUT_DIR;
   const child = new EventEmitter();
-  const code = await launch({
-    env: application.env, args: [],
-    spawnProcess: () => {
-      process.nextTick(() => child.emit("close", 0, null));
-      return child;
-    },
-  });
+  const code = await withImagePath("/e2e-results", path.join(application.root, "results"),
+    () => launch({
+      env: application.env, args: [],
+      spawnProcess: () => {
+        process.nextTick(() => child.emit("close", 0, null));
+        return child;
+      },
+    }));
   assert.equal(code, 0);
-  assert.equal(application.env.OUTPUT_DIR, "/e2e-results");
+  assert.equal(application.env.OUTPUT_DIR, path.resolve("/e2e-results"));
 });
 
 test("should use the image artifact directory for an envelope without an output setting", async () => {
@@ -430,15 +459,16 @@ test("should use the image artifact directory for an envelope without an output 
   delete application.env.OUTPUT_DIR;
   envelope(application);
   const child = new EventEmitter();
-  const code = await launch({
-    env: application.env, args: [],
-    spawnProcess: () => {
-      process.nextTick(() => child.emit("close", 0, null));
-      return child;
-    },
-  });
+  const code = await withImagePath("/e2e-results", path.join(application.root, "results"),
+    () => launch({
+      env: application.env, args: [],
+      spawnProcess: () => {
+        process.nextTick(() => child.emit("close", 0, null));
+        return child;
+      },
+    }));
   assert.equal(code, 0);
-  assert.equal(application.env.OUTPUT_DIR, "/e2e-results");
+  assert.equal(application.env.OUTPUT_DIR, path.resolve("/e2e-results"));
 });
 
 test("should accept a writable envelope output when the inherited output is unusable", async () => {
