@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "script": "tests:gui",
+  "config": "playwright.config.js",
+  "environment": {
+    "NODE_OPTIONS": "--injected-secret"
+  }
+}

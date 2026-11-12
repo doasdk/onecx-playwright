@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "script": "tests:gui",
+  "config": "playwright.config.js",
+  "environment": {
+    "CI": "true",
+    "ENV": "container",
+    "ENVIRONMENTS_JSON": "{}",
+    "TEST_DATA_JSON": "{}",
+    "BASE_URL": "https://onecx.test/",
+    "PLATFORM_INFO_JSON": "{}",
+    "CAPTURE_PRIVATE_ARTIFACTS": "false",
+    "TLS_CA_CERT_PATH": "/etc/ssl/certs/ca-certificates.crt",
+    "OUTPUT_DIR": "/contract-results",
+    "CONTRACT_SMOKE": "true"
+  }
+}

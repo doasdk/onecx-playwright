@@ -1,0 +1,6 @@
+**
+!tests/
+!tests/smoke/
+!tests/smoke/**
+tests/smoke/node_modules/
+tests/smoke/test-results/

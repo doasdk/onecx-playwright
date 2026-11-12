@@ -1,0 +1,9 @@
+node_modules/
+test-results/
+playwright-report/
+allure-results/
+.env
+.env.*
+!.env.example
+onecx-playwright.iml
+.idea/

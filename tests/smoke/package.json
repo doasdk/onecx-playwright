@@ -1,0 +1,13 @@
+{
+  "name": "onecx-playwright-runtime-smoke",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "tests:gui": "playwright test",
+    "tests:fail": "node fail.cjs",
+    "tests:wait": "node wait.cjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0"
+  }
+}
