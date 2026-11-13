@@ -1,0 +1,18 @@
+{
+  "platformConfig": {
+    "platformOverrides": {
+      "ui": {
+        "shell": {
+          "image": "example/shell-ui:smoke"
+        }
+      }
+    },
+    "container": {
+      "e2e": [
+        {
+          "networkAlias": "e2e"
+        }
+      ]
+    }
+  }
+}

@@ -42,7 +42,8 @@ expect_failure() {
     fi
 }
 
-docker run --rm "$runtime" sh -c 'test "$(node --version)" = v22.22.0'
+expected_node=$(cat .node-version)
+docker run --rm "$runtime" sh -c 'test "$(node --version)" = "v$1"' sh "$expected_node"
 expect_failure docker run --rm "$runtime"
 expect_failure docker run --rm "$consumer" unknown-script
 expect_failure docker run --rm -e TEST_ROOT=/missing "$consumer"

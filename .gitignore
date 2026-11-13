@@ -7,3 +7,5 @@ allure-results/
 !.env.example
 onecx-playwright.iml
 .idea/
+.onecx-ci/
+results/

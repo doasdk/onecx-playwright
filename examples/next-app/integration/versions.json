@@ -1,0 +1,5 @@
+{
+  "ui.shell": [
+    "ghcr.io/example/shell-ui:replace-with-release"
+  ]
+}

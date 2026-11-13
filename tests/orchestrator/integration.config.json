@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "platform": {
+    "config": "./platform.json"
+  },
+  "test": {
+    "image": "onecx-playwright-smoke:local",
+    "script": "tests:gui",
+    "timeoutMs": 1800000
+  },
+  "matrix": {
+    "ui.shell": ["example/shell-ui:smoke"]
+  },
+  "components": {
+    "ui.shell": "shell-ui"
+  },
+  "environment": "container",
+  "artifacts": {
+    "capturePrivate": false
+  }
+}

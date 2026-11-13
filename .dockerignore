@@ -2,3 +2,10 @@
 !Dockerfile
 !runtime/
 !runtime/**
+!orchestrator/
+!orchestrator/package*.json
+!orchestrator/workflow-launch.sh
+!orchestrator/runner/
+!orchestrator/runner/**
+!orchestrator/compatibility/
+!orchestrator/compatibility/**

@@ -1,0 +1,18 @@
+{
+  "platformConfig": {
+    "platformOverrides": {
+      "ui": {
+        "shell": {
+          "image": "ghcr.io/example/shell-ui:replace-with-release"
+        }
+      }
+    },
+    "container": {
+      "e2e": [
+        {
+          "networkAlias": "next-app-e2e"
+        }
+      ]
+    }
+  }
+}

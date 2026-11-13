@@ -1,4 +1,4 @@
-name: Build and publish Playwright runtime
+name: Build and publish runtime and orchestrator
 
 on:
   pull_request:
@@ -20,11 +20,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.22.0'
+          node-version-file: .node-version
+      - name: Check generated versions and dependency locks
+        run: node scripts/versions.mjs check
       - name: Validate launcher contracts
         run: |
-          node --test tests/*.test.cjs
+          node --test tests/*.test.cjs scripts/*.test.mjs
           sh -n runtime/entrypoint.sh
+          sh -n orchestrator/workflow-launch.sh
+          npm ci --prefix orchestrator --omit=dev --ignore-scripts --no-audit --no-fund
+          for adapter in orchestrator/compatibility/patch-*.mjs; do node "$adapter"; done
+          for adapter in orchestrator/compatibility/patch-*.mjs; do node "$adapter"; done
+          node --test orchestrator/runner/*.test.mjs
+          node orchestrator/runner/index.mjs validate --config examples/next-app/integration/integration.config.json
       - uses: docker/setup-buildx-action@v3
       - name: Resolve image name
         id: image
@@ -34,6 +42,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: runtime
           load: true
           tags: onecx-playwright:local
           cache-from: type=gha
@@ -43,12 +52,35 @@ jobs:
           docker build -f tests/Dockerfile -t onecx-playwright-smoke:local .
           test "$(docker image inspect onecx-playwright:local --format '{{index .Config.Labels "org.onecx.playwright.contract"}}')" = 1
           sh tests/launcher.sh
+      - name: Build separate orchestrator
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: orchestrator
+          load: true
+          tags: onecx-playwright:local-orchestrator
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Exercise orchestrator without the Docker socket
+        run: |
+          test "$(docker image inspect onecx-playwright:local-orchestrator --format '{{index .Config.Labels "org.onecx.orchestrator.contract"}}')" = 1
+          test "$(docker image inspect onecx-playwright:local-orchestrator --format '{{index .Config.Labels "org.onecx.playwright.contract"}}')" = ""
+          docker run --rm onecx-playwright:local-orchestrator --help
+          docker run --rm --entrypoint sh onecx-playwright:local-orchestrator -c 'docker --version && java -version'
+          docker run --rm \
+            --mount "type=bind,src=$PWD/tests/orchestrator,dst=/consumer,readonly" \
+            onecx-playwright:local-orchestrator validate --config /consumer/integration.config.json
+          docker run --rm \
+            --mount "type=bind,src=$PWD/tests/orchestrator,dst=/consumer,readonly" \
+            onecx-playwright:local-orchestrator matrix --config /consumer/integration.config.json --results /results
       - name: Check release version
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           version=$(docker image inspect onecx-playwright:local --format '{{index .Config.Labels "org.opencontainers.image.version"}}')
           test "${GITHUB_REF_NAME#v}" = "$version"
+          orchestrator_version=$(docker image inspect onecx-playwright:local-orchestrator --format '{{index .Config.Labels "org.opencontainers.image.version"}}')
+          test "$orchestrator_version" = "$version-orchestrator"
       - uses: docker/metadata-action@v5
         id: metadata
         with:
@@ -64,14 +96,36 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: orchestrator-metadata
+        with:
+          images: ${{ steps.image.outputs.name }}
+          flavor: latest=false,suffix=-orchestrator
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=semver,pattern={{version}}
       - name: Publish validated runtime
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: runtime
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha
+          provenance: true
+          sbom: true
+      - name: Publish validated orchestrator
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: orchestrator
+          push: true
+          tags: ${{ steps.orchestrator-metadata.outputs.tags }}
+          labels: ${{ steps.orchestrator-metadata.outputs.labels }}
           cache-from: type=gha
           provenance: true
           sbom: true

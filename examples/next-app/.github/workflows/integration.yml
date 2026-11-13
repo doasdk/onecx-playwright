@@ -1,0 +1,22 @@
+name: Next app integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    # Replace with the published shared workflow release or its immutable SHA.
+    uses: doasdk/onecx-playwright/.github/workflows/integration.yml@<release-tag>
+    with:
+      orchestrator-image: ${{ vars.ORCHESTRATOR_IMAGE }}
+      e2e-image: ${{ vars.E2E_IMAGE }}
+      environment: integration
+      config-path: integration/integration.config.json
+      max-parallel: 2
+    secrets:
+      ENVIRONMENTS_JSON: ${{ secrets.ENVIRONMENTS_JSON }}
+      TEST_DATA_JSON: ${{ secrets.TEST_DATA_JSON }}
+      DOCKER_AUTH_CONFIG: ${{ secrets.DOCKER_AUTH_CONFIG }}

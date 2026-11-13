@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "platform": {
+    "config": "./platform.json"
+  },
+  "test": {
+    "image": "ghcr.io/example/next-app-e2e:replace-with-release",
+    "script": "tests:gui",
+    "timeoutMs": 1800000
+  },
+  "matrix": "./versions.json",
+  "components": {
+    "ui.shell": "shell-ui"
+  },
+  "environment": "container",
+  "artifacts": {
+    "capturePrivate": false
+  }
+}
