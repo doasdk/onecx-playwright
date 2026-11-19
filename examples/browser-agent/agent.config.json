@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "prompt": "prompt.md",
+  "requiredChecks": ["page-title", "page-content"],
+  "requiredTools": ["browser_snapshot"]
+}

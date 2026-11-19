@@ -18,6 +18,7 @@ const result = spawnSync('npm', ['run', input.script], {
     NODE_EXTRA_CA_CERTS: '/tmp/onecx-ca.pem',
     PLATFORM_INFO_JSON: JSON.stringify(input.metadata),
     CAPTURE_PRIVATE_ARTIFACTS: String(input.capture),
+    ...(input.agentConfig === undefined ? {} : { AGENT_CONFIG_JSON: input.agentConfig }),
   },
   stdio: 'inherit',
 })

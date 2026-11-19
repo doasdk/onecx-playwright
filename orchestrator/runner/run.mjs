@@ -8,6 +8,7 @@ import { createRequire } from 'node:module'
 import { applySelection, getComponentImageTarget, runtimeJson, validateSelection } from './matrix.mjs'
 import { executeImage } from './execute-image.mjs'
 import { executionFailureStage } from './image-execution-contract.mjs'
+import { exportAgentReport, readAgentConfig } from './agent-contract.mjs'
 
 const packageRequire = createRequire(import.meta.url)
 
@@ -278,6 +279,7 @@ export async function runSingle(config, options = {}) {
       config.configDirectory
     )
     const data = runtimeJson(env.TEST_DATA_JSON, env.TEST_DATA_JSON_FILE, 'TEST_DATA_JSON', config.configDirectory)
+    const agentConfig = readAgentConfig(env, config.configDirectory)
     const platformConfig = applySelection(config.platformConfig, selection, config)
     const images = {}
     stage = 'image-resolution'
@@ -372,6 +374,7 @@ export async function runSingle(config, options = {}) {
         },
         environments,
         data,
+        ...(agentConfig === undefined ? {} : { agentConfig }),
         environment: config.environment,
         script: config.test.script,
         capture: config.artifacts.capturePrivate,
@@ -401,6 +404,11 @@ export async function runSingle(config, options = {}) {
       copyReportResults(
         join(workDir, 'e2e-results', e2eConfig.networkAlias, 'execution.json'),
         join(resultsDir, 'execution.json')
+      )
+      exportAgentReport(
+        join(workDir, 'e2e-results', e2eConfig.networkAlias, 'agent-report.json'),
+        join(resultsDir, 'agent-report.json'),
+        agentConfig
       )
       try {
         summary.allureReportStatus = generateReport(resultsDir, join(resultsDir, 'allure-report'))

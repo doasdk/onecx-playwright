@@ -24,12 +24,13 @@ function fixture() {
   for (const file of [
     'versions.json', 'scripts/Dockerfile.template', 'orchestrator/compatibility/compatibility.json',
     'orchestrator/package.json', 'orchestrator/package-lock.json',
-    'tests/smoke/package.json', 'tests/smoke/package-lock.json'
+    'tests/smoke/package.json', 'tests/smoke/package-lock.json',
+    'agent/package.json', 'agent/package-lock.json'
   ]) {
     mkdirSync(dirname(join(directory, file)), { recursive: true })
     cpSync(join(root, file), join(directory, file))
   }
-  synchronize(directory)
+  synchronize(directory, { install: fakeInstall })
   return directory
 }
 
@@ -161,7 +162,10 @@ test('should regenerate every active release pin using one command', () => {
   const dockerfile = readFileSync(join(directory, 'Dockerfile'), 'utf8')
   assert.ok(dockerfile.includes('org.opencontainers.image.version="9.8.7-rc.1"'))
   assert.ok(dockerfile.includes('org.opencontainers.image.version="9.8.7-rc.1-orchestrator"'))
-  assert.deepEqual(installed, ['orchestrator'])
+  assert.ok(dockerfile.includes('org.opencontainers.image.version="9.8.7-rc.1-agent-runtime"'))
+  assert.equal(readJson(directory, 'agent/package.json').version, '9.8.7-rc.1')
+  assert.equal(readJson(directory, 'agent/package-lock.json').version, '9.8.7-rc.1')
+  assert.deepEqual(installed, ['orchestrator', 'agent'])
   main(['--check'], directory, () => assert.fail('check must remain offline'))
 })
 
@@ -196,6 +200,21 @@ test('should update the orchestration dependency lock without changing the compa
   assert.equal(readJson(directory, 'orchestrator/package.json').dependencies['allure-commandline'], '9.8.7')
   assert.equal(readFileSync(join(directory, 'orchestrator/compatibility/compatibility.json'), 'utf8'), baseline)
 })
+
+for (const [field, dependency] of [['claudeCode', '@anthropic-ai/claude-code'], ['playwrightMcp', '@playwright/mcp']]) {
+  test(`should update only the agent lock when ${field} changes`, () => {
+    const directory = fixture()
+    update(directory, 'versions.json', (config) => { config[field] = '9.8.7' })
+    const installed = []
+    main(['sync'], directory, (base, relative) => {
+      installed.push(relative)
+      fakeInstall(base, relative)
+    })
+    assert.equal(readJson(directory, 'agent/package.json').dependencies[dependency], '9.8.7')
+    assert.deepEqual(installed, ['agent'])
+    main(['check'], directory, () => assert.fail('check must remain offline'))
+  })
+}
 
 for (const mismatch of [false, true]) {
   test(`should ${mismatch ? 'reject mismatched' : 'verify manifest-derived'} installed Docker dependencies`, () => {

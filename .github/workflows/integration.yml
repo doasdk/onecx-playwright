@@ -20,6 +20,10 @@ on:
       max-parallel:
         type: number
         default: 2
+      artifact-prefix:
+        description: Distinguishes artifacts when calling this workflow more than once
+        type: string
+        default: integration
       upload-private-artifacts:
         description: Explicit opt-in to publish package-captured private artifacts (may contain sensitive data)
         type: boolean
@@ -32,6 +36,9 @@ on:
       ENVIRONMENTS_JSON:
         required: false
       TEST_DATA_JSON:
+        required: false
+      AGENT_CONFIG_JSON:
+        description: Optional runtime-only model gateway configuration; never supplied to image builds
         required: false
       DOCKER_AUTH_CONFIG:
         description: Docker config.json contents for all required private registries
@@ -101,7 +108,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: integration-matrix-index
+          name: ${{ inputs.artifact-prefix }}-matrix-index
           path: results/matrix-index-input.json
           if-no-files-found: error
           retention-days: 7
@@ -154,15 +161,17 @@ jobs:
           MATRIX_SELECTION_BASE64: ${{ matrix.selectionBase64 }}
           ENVIRONMENTS_JSON: ${{ secrets.ENVIRONMENTS_JSON || secrets.environments-json }}
           TEST_DATA_JSON: ${{ secrets.TEST_DATA_JSON || secrets.test-data-json }}
+          AGENT_CONFIG_JSON: ${{ secrets.AGENT_CONFIG_JSON }}
         run: sh .onecx-ci/launch.sh run
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: integration-run-${{ matrix.runId }}
+          name: ${{ inputs.artifact-prefix }}-run-${{ matrix.runId }}
           path: |
             results/**/summary.json
             results/**/versions.json
             results/**/execution.json
+            results/**/agent-report.json
             results/**/allure-results/**
             results/**/allure-report/**
           if-no-files-found: warn
@@ -171,7 +180,7 @@ jobs:
         if: always() && inputs.upload-private-artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: private-integration-run-${{ matrix.runId }}
+          name: private-${{ inputs.artifact-prefix }}-run-${{ matrix.runId }}
           path: |
             results/**/private/**
             results/**/private-artifacts/**
@@ -211,7 +220,7 @@ jobs:
           password: ${{ secrets.docker-password }}
       - uses: actions/download-artifact@v4
         with:
-          pattern: integration-*
+          pattern: ${{ inputs.artifact-prefix }}-*
           path: results
           merge-multiple: true
       - name: Extract version-matched shared launcher
@@ -227,11 +236,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: integration-report
+          name: ${{ inputs.artifact-prefix }}-report
           path: |
             results/**/summary.json
             results/**/versions.json
             results/**/execution.json
+            results/**/agent-report.json
             results/**/allure-results/**
             results/**/allure-report/**
             results/matrix-index-input.json

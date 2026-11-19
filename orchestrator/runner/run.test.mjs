@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadConfig } from './matrix.mjs'
@@ -45,11 +45,19 @@ function fixture(t) {
   return { root, config: loadConfig(configPath, {}) }
 }
 
-test('should execute a custom application with opaque runtime objects and no Workspace shell settings', async (t) => {
+async function executeCustomApplication(t, agentEnabled) {
   const { root, config } = fixture(t)
   const env = {
     ENVIRONMENTS_JSON: JSON.stringify({ custom: { appUrl: 'https://catalog.example' } }),
     TEST_DATA_JSON: JSON.stringify({ records: [{ name: 'sample' }] }),
+  }
+  const agentConfig = JSON.stringify({
+    anthropicBaseUrl: 'https://model-gateway.example', model: 'test-model', apiKey: 'private-agent-key',
+  })
+  if (agentEnabled) {
+    const configFile = join(root, 'agent-config.json')
+    writeFileSync(configFile, agentConfig)
+    env.AGENT_CONFIG_JSON_FILE = configFile
   }
   const calls = []
   const expectedImage = 'sha256:catalog'
@@ -91,6 +99,16 @@ test('should execute a custom application with opaque runtime objects and no Wor
       return ''
     },
     executeImage: async (options) => {
+      assert.equal(options.agentConfig, agentEnabled ? agentConfig : undefined)
+      if (agentEnabled) {
+        const output = join(options.runDir, 'e2e-results', options.alias)
+        mkdirSync(output, { recursive: true })
+        writeFileSync(join(output, 'agent-report.json'), JSON.stringify({
+          schemaVersion: 1, verdict: 'passed', summary: 'private-agent-key', checks: [],
+        }))
+        writeFileSync(join(output, 'transcript.json'), '{"private":"raw transcript"}')
+        writeFileSync(join(output, 'storage-state.json'), '{"private":"auth state"}')
+      }
       assert.deepEqual(options.environments, { custom: { appUrl: 'https://catalog.example' } })
       assert.deepEqual(options.data, { records: [{ name: 'sample' }] })
       assert.equal(options.environment, 'custom')
@@ -122,13 +140,25 @@ test('should execute a custom application with opaque runtime objects and no Wor
   assert.equal(publicSummary.allureReportStatus, 'not-generated')
   assert.equal(publicSummary.imageStatus.status, 'verified')
   assert.equal(publicSummary.imageStatus.verified, 2)
+  const reportPath = join(root, 'results', 'catalog-run', 'agent-report.json')
+  assert.equal(existsSync(reportPath), agentEnabled)
+  if (agentEnabled) {
+    assert.equal(JSON.parse(readFileSync(reportPath, 'utf8')).summary, '[REDACTED]')
+    assert.equal(existsSync(join(root, 'results', 'catalog-run', 'transcript.json')), false)
+    assert.equal(existsSync(join(root, 'results', 'catalog-run', 'storage-state.json')), false)
+  }
   assert.equal(
     JSON.parse(readFileSync(join(root, 'results', 'catalog-run', 'versions.json'), 'utf8')).images[
       'services.catalog'
     ].verified,
     true
   )
-})
+}
+
+for (const agentEnabled of [false, true]) {
+  test(`should execute a custom application with opaque runtime objects when agentEnabled=${agentEnabled}`,
+    (t) => executeCustomApplication(t, agentEnabled))
+}
 
 test('should fail the run when the started container image differs from the selected image', async (t) => {
   const { root, config } = fixture(t)

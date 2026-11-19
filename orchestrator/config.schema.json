@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OneCX orchestrator configuration",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "extends": { "type": "string", "pattern": "\\S" },
+    "platform": {
+      "type": "object",
+      "required": ["config"],
+      "properties": { "config": { "type": "string", "pattern": "\\S" } }
+    },
+    "test": {
+      "type": "object",
+      "required": ["image"],
+      "properties": {
+        "image": { "type": "string", "minLength": 1 },
+        "script": { "type": "string", "pattern": "^[A-Za-z0-9:_-]+$" },
+        "timeoutMs": { "type": "integer", "minimum": 1000 },
+        "baseUrl": { "type": "string", "format": "uri" }
+      }
+    },
+    "matrix": {
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+        }
+      ]
+    },
+    "components": { "type": "object", "additionalProperties": { "type": "string" } },
+    "environment": { "type": "string", "pattern": "\\S" },
+    "artifacts": {
+      "type": "object",
+      "properties": { "capturePrivate": { "type": "boolean" } }
+    }
+  },
+  "if": { "required": ["extends"] },
+  "then": {
+    "propertyNames": {
+      "enum": ["$schema", "schemaVersion", "extends", "platform", "test", "matrix", "components", "environment", "artifacts"]
+    }
+  },
+  "else": { "required": ["platform", "test", "components"] }
+}

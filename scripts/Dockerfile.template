@@ -54,5 +54,18 @@ WORKDIR /work
 ENTRYPOINT ["node", "/opt/onecx-orchestrator/runner/index.mjs"]
 CMD ["--help"]
 
+FROM runtime AS agent-runtime
+LABEL org.opencontainers.image.title="OneCX shared browser agent runtime" \
+      org.opencontainers.image.description="Reusable Claude and Playwright MCP browser agent; authenticated live-page fixture handoff" \
+      org.opencontainers.image.version="{{release}}-agent-runtime"
+
+WORKDIR /opt/onecx-agent
+COPY agent/package.json agent/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund \
+    && FAIL_ON_MISSING_NATIVE=1 node node_modules/@anthropic-ai/claude-code/install.cjs
+COPY agent/ ./
+ENV PATH="/opt/onecx-agent/node_modules/.bin:${PATH}"
+WORKDIR /app/integration
+
 # Keep an unqualified docker build backwards-compatible with the runtime.
 FROM runtime AS default-runtime

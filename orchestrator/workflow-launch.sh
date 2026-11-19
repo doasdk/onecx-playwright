@@ -38,7 +38,7 @@ cleanup() {
             cleanup_status=1
         fi
     fi
-    if ! rm -f "$state/environments.json" "$state/data.json"; then
+    if ! rm -f "$state/environments.json" "$state/data.json" "$state/agent-config.json"; then
         echo "Cleanup failed: could not remove local integration secret files." >&2
         cleanup_status=1
     fi
@@ -67,6 +67,7 @@ set -- docker create --init \
     --mount "type=volume,src=$volume,dst=$mountpoint" \
     --workdir "$mountpoint/source" \
     -e "CI=${CI:-}" \
+    -e "ONECX_CONFIG_SOURCE_ROOT=$mountpoint/source" \
     -e "TMPDIR=$mountpoint/work" \
     -e "ONECX_MATRIX_INDEX_FILE=$mountpoint/results/matrix-index-input.json"
 if [ "$mode" = run ]; then
@@ -83,6 +84,9 @@ if [ -n "${ENVIRONMENTS_JSON:-}" ]; then
 fi
 if [ -n "${TEST_DATA_JSON:-}" ]; then
     set -- "$@" -e "TEST_DATA_JSON_FILE=$mountpoint/secrets/data.json"
+fi
+if [ "$mode" = run ] && [ -n "${AGENT_CONFIG_JSON:-}" ]; then
+    set -- "$@" -e "AGENT_CONFIG_JSON_FILE=$mountpoint/secrets/agent-config.json"
 fi
 set -- "$@" "$ORCHESTRATOR_IMAGE" "$mode" \
     --config "$mountpoint/source/$CONFIG_PATH" \
@@ -113,7 +117,11 @@ if [ -n "${TEST_DATA_JSON:-}" ]; then
     printf '%s' "$TEST_DATA_JSON" >"$state/data.json"
     docker cp "$state/data.json" "$container:$mountpoint/secrets/data.json" >>"$state/private.log" 2>&1
 fi
-unset ENVIRONMENTS_JSON TEST_DATA_JSON
+if [ "$mode" = run ] && [ -n "${AGENT_CONFIG_JSON:-}" ]; then
+    printf '%s' "$AGENT_CONFIG_JSON" >"$state/agent-config.json"
+    docker cp "$state/agent-config.json" "$container:$mountpoint/secrets/agent-config.json" >>"$state/private.log" 2>&1
+fi
+unset ENVIRONMENTS_JSON TEST_DATA_JSON AGENT_CONFIG_JSON
 echo "Executing integration $mode..." >&2
 if [ "$mode" = matrix ]; then
     docker start -a "$container" >"$state/matrix.json" 2>>"$state/private.log"

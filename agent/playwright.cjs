@@ -1,0 +1,5 @@
+exports.createLiveBrowser = async (options) => (await import('./live-browser.mjs')).createLiveBrowser(options)
+exports.runBrowserAgent = async (options) => (await import('./run.mjs')).runBrowserAgent(options)
+exports.initializeAgentReport = async (options) => (await import('./run.mjs')).initializeAgentReport(options)
+exports.recordAssessment = (...args) => require('./media.cjs').recordAssessment(...args)
+exports.createAgentFixtures = (options) => require('./fixtures.cjs').createAgentFixtures(options)

@@ -88,6 +88,19 @@ test("should source shared tooling from the selected image rather than the calle
     assert.doesNotMatch(workflow, /uses: \.\//);
 });
 
+test("should forward agent configuration only as an optional run secret and publish only its public report", () => {
+    const workflow = fs.readFileSync(path.join(root, ".github/workflows/integration.yml"), "utf8").replaceAll("\r", "");
+    const [beforeRun, afterRun] = workflow.split("\n  run:\n");
+    const [runJob, reportJob] = afterRun.split("\n  report:\n");
+    assert.match(beforeRun, /AGENT_CONFIG_JSON:\s+description:[^\n]+\s+required: false/);
+    assert.doesNotMatch(beforeRun, /AGENT_CONFIG_JSON: \$\{\{/);
+    assert.match(runJob, /AGENT_CONFIG_JSON: \$\{\{ secrets\.AGENT_CONFIG_JSON \}\}/);
+    assert.doesNotMatch(reportJob, /secrets\.AGENT_CONFIG_JSON/);
+    assert.equal(workflow.match(/results\/\*\*\/agent-report\.json/g).length, 2);
+    assert.doesNotMatch(workflow, /results\/\*\*\/(transcript|storage-state|agent-config)/);
+    assert.doesNotMatch(dockerfile, /AGENT_CONFIG_JSON|authToken|apiKey/);
+});
+
 test("should keep the next app example free of duplicated orchestration scripts", () => {
     const config = JSON.parse(fs.readFileSync(path.join(root, "examples/next-app/integration/integration.config.json")));
     const versions = JSON.parse(fs.readFileSync(path.join(root, "examples/next-app/integration/versions.json")));
@@ -120,16 +133,49 @@ test("should publish private artifacts only with an explicit caller opt-in", () 
     const workflow = fs.readFileSync(path.join(root, ".github/workflows/integration.yml"), "utf8");
     assert.match(workflow, /upload-private-artifacts:\s+description:[^\n]+\s+type: boolean\s+default: false/);
     assert.match(workflow, /if: always\(\) && inputs.upload-private-artifacts/);
-    assert.match(workflow, /name: private-integration-run-/);
-    assert.match(workflow, /pattern: integration-\*/);
+    assert.match(workflow, /name: private-\$\{\{ inputs.artifact-prefix \}\}-run-/);
+    assert.match(workflow, /pattern: \$\{\{ inputs.artifact-prefix \}\}-\*/);
 });
 
-test("should validate both image variants without unpublished package prerequisites", () => {
+test("should namespace every workflow artifact while retaining the integration default", () => {
+    const workflow = fs.readFileSync(path.join(root, ".github/workflows/integration.yml"), "utf8");
+    assert.match(workflow, /artifact-prefix:\s+description:[^\n]+\s+type: string\s+default: integration/);
+    for (const suffix of ["matrix-index", "run-${{ matrix.runId }}", "report"]) {
+        assert.ok(workflow.includes(`name: \${{ inputs.artifact-prefix }}-${suffix}`));
+    }
+    assert.doesNotMatch(workflow, /name: (?:private-)?integration-|pattern: integration-\*/);
+});
+
+test("should install isolated agent tooling without changing the inherited runtime launcher", () => {
+    const agent = dockerfile.split("FROM runtime AS agent-runtime")[1].split("FROM runtime AS default-runtime")[0];
+    assert.ok(agent.includes(`org.opencontainers.image.version="${versions.release}-agent-runtime"`));
+    assert.match(agent, /WORKDIR \/opt\/onecx-agent/);
+    assert.match(agent, /COPY agent\/package.json agent\/package-lock.json \.\//);
+    assert.match(agent, /npm ci --ignore-scripts/);
+    assert.match(agent, /node node_modules\/@anthropic-ai\/claude-code\/install.cjs/);
+    assert.doesNotMatch(agent, /install-browser/);
+    assert.match(agent, /COPY agent\/ \.\//);
+    assert.match(agent, /WORKDIR \/app\/integration/);
+    assert.doesNotMatch(agent, /ENTRYPOINT|CMD|org\.onecx\.playwright\.contract|docker\.io/);
+    const ignore = fs.readFileSync(path.join(root, ".dockerignore"), "utf8");
+    assert.match(ignore, /!agent\/\*\*/);
+    assert.match(ignore, /^agent\/node_modules\/$/m);
+    assert.match(ignore, /^agent\/\*\.test\.mjs$/m);
+    assert.match(ignore, /^agent\/tests\/$/m);
+});
+
+test("should validate and publish all image variants without unpublished package prerequisites", () => {
     const workflow = fs.readFileSync(path.join(root, ".github/workflows/image.yml"), "utf8");
     assert.match(workflow, /npm ci --prefix orchestrator/);
     assert.match(workflow, /node --test orchestrator\/runner\/\*\.test.mjs/);
     assert.match(workflow, /target: runtime/);
     assert.match(workflow, /target: orchestrator/);
+    assert.match(workflow, /target: agent-runtime/);
+    assert.match(workflow, /node --test agent\/\*\.test.mjs/);
+    assert.match(workflow, /node agent\/node_modules\/playwright\/cli.js install --with-deps chromium/);
+    assert.match(workflow, /suffix=-agent-runtime/);
+    assert.match(workflow, /test "\$agent_version" = "\$version-agent-runtime"/);
+    assert.match(workflow, /tags: \$\{\{ steps.agent-metadata.outputs.tags \}\}/);
     assert.match(workflow, /node-version-file: .node-version/);
     assert.ok(workflow.indexOf("node scripts/versions.mjs check") < workflow.indexOf("node --test"));
     assert.doesNotMatch(workflow, /0\.12\.0|unpublished-package|integration-package-ref|build-contexts/);

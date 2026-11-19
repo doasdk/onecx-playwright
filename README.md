@@ -32,7 +32,7 @@ An orchestrator may separately provision the OneCX service containers.
 After publication, pin a release tag, preferably its digest:
 
 ```dockerfile
-FROM ghcr.io/doasdk/onecx-playwright:0.0.3
+FROM ghcr.io/doasdk/onecx-playwright:0.0.4
 
 COPY integration/package.json integration/package-lock.json ./
 # Required only while the app consumes a vendored common-package archive.
@@ -187,7 +187,7 @@ The smoke consumer uses its own lockfile and launches Chromium, Firefox, and
 WebKit without external app services. The GitHub workflow validates before
 publishing to `ghcr.io/<repository-owner>/<repository-name>`. PRs only build/test;
 main publishes a moving development tag and SHA tag. A `v<release>` tag publishes
-`<release>` and `<release>-orchestrator`, without a `latest` tag. Configure package access so consuming CI can pull
+`<release>`, `<release>-orchestrator`, and `<release>-agent-runtime`, without a `latest` tag. Configure package access so consuming CI can pull
 it; do not use the moving main tag for reproducible matrix runs.
 
 ### Single-source version updates
@@ -201,7 +201,7 @@ node scripts/versions.mjs release <new-semantic-version>
 ```
 
 For dependency/runtime updates, edit `nodeImage`, `playwrightImage`,
-`integrationTests`, or `allure` in `versions.json`, then run:
+`integrationTests`, `allure`, `claudeCode`, or `playwrightMcp` in `versions.json`, then run:
 
 ```shell
 node scripts/versions.mjs sync
@@ -368,6 +368,8 @@ jobs:
     secrets:
       ENVIRONMENTS_JSON: ${{ secrets.ENVIRONMENTS_JSON }}
       TEST_DATA_JSON: ${{ secrets.TEST_DATA_JSON }}
+      # Optional: only for an app-owned prompt-driven agent lane.
+      AGENT_CONFIG_JSON: ${{ secrets.AGENT_CONFIG_JSON }}
       DOCKER_AUTH_CONFIG: ${{ secrets.DOCKER_AUTH_CONFIG }}
 ```
 
@@ -387,6 +389,258 @@ They must permit pulling the orchestrator, platform, and application images.
 are opaque application JSON objects, also accepted by the package CLI through
 their `*_FILE` settings; the workflow passes secret files using `docker cp`.
 
+### Shared reusable browser agent (0.0.4)
+
+The optional `agent-runtime` Docker target inherits `runtime`, including contract
+label 1, the entrypoint, and its default command. It adds locked Claude Code and
+Playwright MCP dependencies under `/opt/onecx-agent`, runs the native Claude
+installer explicitly after `npm ci --ignore-scripts`. The live browser is launched
+by the application's injected Playwright Chromium using the browser already
+installed in the base runtime; MCP attaches over CDP and needs no additional
+browser installation. Agent tests and
+`node_modules` from the checkout are excluded from the build context.
+The ordinary runtime and orchestrator remain separate and unchanged.
+When running as root, the agent explicitly disables Chromium's sandbox; non-root
+execution retains it. Run this lane only against trusted integration targets in
+an isolated environment, never as a sandbox for untrusted sites or prompts.
+
+A new application supplies configuration, prompts, a thin Playwright fixture,
+and a handwritten Playwright test; it does not copy the shared agent loop.
+Its existing common-e2e `authenticatedPage` fixture performs login and navigation
+using an overridden shared live `page`/`context`. After application-specific
+readiness checks, the test passes that exact authenticated Page to the agent.
+See `examples/browser-agent` for the fixture/spec wiring.
+The application still supplies its locked `@playwright/test` dependency matching
+the ordinary runtime and readable `playwright.config.ts`, as required by the
+inherited launcher. For example, add to its integration package:
+
+```json
+{
+  "scripts": {
+    "tests:agent": "playwright test --config=agent/playwright.config.ts"
+  }
+}
+```
+
+```dockerfile
+FROM ghcr.io/doasdk/onecx-playwright:0.0.4-agent-runtime
+COPY integration/package.json integration/package-lock.json ./
+RUN npm ci --include=dev --ignore-scripts --no-audit --no-fund
+COPY integration/ ./
+# The inherited launcher appends --config /app/integration/playwright.config.ts.
+COPY integration/agent.playwright.config.ts ./playwright.config.ts
+```
+
+Keep the inherited ENTRYPOINT. Set the integration config's `test.script` to
+`tests:agent` and `test.image` to this consumer image. A minimal
+`agent.config.json` is:
+
+```json
+{
+  "schemaVersion": 1,
+  "prompt": "./prompts/check-navigation.md",
+  "requiredChecks": ["navigation"],
+  "requiredTools": ["browser_snapshot", "browser_click"]
+}
+```
+
+The configuration contains exactly the four keys above. Prompt paths resolve
+relative to the agent config; absolute paths, directory escapes, and escaping
+symlinks are rejected. `requiredChecks` names the exact
+checks the report must satisfy; `requiredTools` lists required Playwright MCP
+browser tool names (`browser_snapshot`, `browser_click`, or
+`browser_wait_for`). Check names are unique lowercase identifiers, starting with
+a letter and containing only letters, digits, underscores, and hyphens.
+Required tools must have actual successful calls recorded by the shared MCP
+execution trace; model-only claims or fabricated tool results cannot satisfy
+this requirement. CLI initialization errors fail safely with a nonzero exit.
+Prompts describe application behaviour, not credentials. The model must never
+navigate, reload, open/close tabs, create contexts, attempt login, or change
+application data. A visible login form is inconclusive, not permission to log in.
+Only the selected safe tools are advertised and accepted by the MCP shim; Claude
+also has an explicit tool allowlist. Clicks can still trigger navigation or data
+changes, so these guardrails are not a security sandbox.
+
+The shared CommonJS bridge `/opt/onecx-agent/playwright.cjs` exports:
+
+```js
+const live = await createLiveBrowser({ chromium, contextOptions, env })
+// Returns { page, context, cdpEndpoint, close }.
+// Override the existing authenticatedPage fixture's page/context dependencies,
+// let it log in and navigate, then verify application readiness.
+const result = await runBrowserAgent({
+  page: authenticatedPage,
+  cdpEndpoint: live.cdpEndpoint,
+  configPath,
+  env,
+  secrets: []
+})
+// result is numeric 0 or 1. In fixture finally: await live.close().
+```
+
+Before `createLiveBrowser`, call
+`initializeAgentReport({ configPath, env })` in the fixture. This additional
+bridge export returns `Promise<void>` and clears stale passes with an
+inconclusive report for the configured checks before login/setup can fail.
+All runtime APIs use the same output resolution: explicit `env.OUTPUT_DIR`,
+otherwise `/OUTPUT_DIR`. Use one explicit writable directory throughout.
+
+For new consumers, `createAgentFixtures({ chromium, configPath, outputRoot })`
+returns the fixture overrides for `baseTest.extend(...)`, including
+`liveBrowser` and `agentEnvironment`. It handles report initialization and browser
+cleanup; the existing authenticated fixture still owns credentials and login.
+The low-level APIs above remain available. Wrap the invocation and success
+assertion in `recordAssessment(page, testInfo, callback)` for agent-phase video
+on every run and screenshots on failure. Mark the test with `agent-prepared`
+after deterministic readiness.
+
+Allure reporting is provided by `/opt/onecx-agent/allure-reporter.cjs`, with
+options `{ outputRoot, requiredChecks, suite }`. It derives names/history from
+the caller's test title/ID, attaches per-check evidence and allowed media, and
+never copies raw login/helper attachments or process logs. The generic fixture,
+reporter, Allure SDK, and recording helpers ship in the shared image; do not
+copy them into each consumer. See `examples/browser-agent` for the agent-only
+configuration. The root `agent.playwright.config.ts` used in the Docker example
+is a one-line re-export: `export { default } from './agent/playwright.config'`.
+Video and screenshots can contain application data; keep artifact access restricted.
+
+Set `ONECX_AGENT_RUNTIME_DIR` for a local bridge location. `chromium` is the
+consumer's Playwright browser type. Context options, including HTTPS handling,
+are retained. The browser uses a private persistent default profile beneath
+`OUTPUT_DIR` and an ephemeral CDP endpoint bound to `127.0.0.1`; do not publish
+that port. MCP uses `--cdp-endpoint` and the page's origin without launching a
+browser, importing storage state, or navigating. Exactly one context and one
+ready HTTP(S) page are required. CDP browser endpoint, page target ID, document
+loader ID, and URL are checked before/after model execution. The same DOM,
+sessionStorage, and JavaScript SDK memory remain alive throughout the handoff.
+No DOM marker or page script is inserted for identity validation.
+
+The application owns authentication and readiness. It never gives login
+credentials to Claude or MCP. `secrets` supplies known values only for in-process
+report redaction, not prompts or subprocess configuration. Only Claude receives
+model tokens. The browser and MCP receive minimal environments. The live fixture
+must remain open until the agent returns; MCP disconnect does not close the
+caller-owned browser. Fixture teardown closes it and deletes the private
+profile. Private execution files are cleaned after the model run.
+
+There is no standalone agent CLI or authentication adapter. Run the same
+handwritten Playwright spec locally using the consumer's existing configuration,
+with model configuration supplied by a secret manager and application login
+settings available only to its existing trusted fixtures:
+
+```shell
+npm ci --prefix agent --ignore-scripts --no-audit --no-fund
+node agent/node_modules/@anthropic-ai/claude-code/install.cjs
+# In the consumer integration directory, using its installed browser:
+npm run tests:agent
+```
+
+The shared model-free regression suite (`node --test agent/*.test.mjs`) uses the
+locally installed shared Playwright browser for a synthetic MCP snapshot/click
+test. That development-only browser is not required in the runtime image.
+Disable consumer traces, screenshots, video, and authentication-bearing logs
+for this suite; do not export hidden profile/execution directories.
+
+For CI, call the reusable workflow at `@v0.0.4` with a separate agent integration
+config and images selected by `vars.AGENT_ORCHESTRATOR_IMAGE` and
+`vars.AGENT_E2E_IMAGE`:
+
+```yaml
+jobs:
+  agent:
+    uses: doasdk/onecx-playwright/.github/workflows/integration.yml@v0.0.4
+    with:
+      config-path: integration/agent.integration.config.json
+      orchestrator-image: ${{ vars.AGENT_ORCHESTRATOR_IMAGE }}
+      e2e-image: ${{ vars.AGENT_E2E_IMAGE }}
+      artifact-prefix: agent
+    secrets:
+      ENVIRONMENTS_JSON: ${{ secrets.ENVIRONMENTS_JSON }}
+      TEST_DATA_JSON: ${{ secrets.TEST_DATA_JSON }}
+      AGENT_CONFIG_JSON: ${{ secrets.AGENT_CONFIG_JSON }}
+```
+
+Pin `AGENT_ORCHESTRATOR_IMAGE` to `0.0.4-orchestrator` (prefer a digest) and
+`AGENT_E2E_IMAGE` to the immutable application agent image. Configure registry
+authentication when needed, just as for deterministic runs.
+`artifact-prefix` defaults to `integration`, preserving existing artifact names;
+use distinct prefixes when deterministic and agent calls run in one workflow.
+This namespaces the matrix index, run, private, combined report, and download
+selection without changing result paths or matrix IDs.
+
+Deterministic tests are unchanged when `AGENT_CONFIG_JSON` is absent; the workflow
+does not select an agent lane automatically.
+
+The reusable workflow accepts the optional **secret** `AGENT_CONFIG_JSON`:
+
+```json
+{
+  "anthropicBaseUrl": "https://model-gateway.example/anthropic",
+  "model": "your-enabled-model",
+  "authToken": "<runtime-secret>",
+  "extraCaCertPem": "<optional PEM certificate bundle>"
+}
+```
+
+Required fields are `anthropicBaseUrl`, `model`, and **exactly one** of
+`authToken` or `apiKey`. `extraCaCertPem` is optional; omit it when unused.
+Additional fields, empty strings, NUL characters, URL credentials/fragments,
+and non-HTTPS model endpoints are rejected, including loopback HTTP endpoints.
+Application target URLs may still use HTTP for local integration testing.
+PEM content is consumed privately by the agent process, not
+installed into the shared image trust store.
+The orchestrator and shared agent apply the same provider validation: use an HTTPS endpoint
+without query parameters, a model identifier (letters, digits, `.`, `_`, `:`,
+`/`, and `-`), a credential without line breaks, and a valid PEM certificate
+bundle when configured.
+
+Only the selected `run` job receives this secret. The host launcher writes a
+mode-600 private file, copies it to the orchestrator's private volume, forwards
+only `AGENT_CONFIG_JSON_FILE`, and deletes the host file on cleanup. The runner
+accepts either `AGENT_CONFIG_JSON` or `AGENT_CONFIG_JSON_FILE` (relative file
+paths resolve from the integration config directory), never both nonempty.
+Validation errors are generic and never include secret values. The validated
+JSON is forwarded verbatim as `environment.AGENT_CONFIG_JSON` in the private
+contract-1 runtime envelope; the legacy compatibility bootstrap also supports
+the explicit setting. No arbitrary host environment forwarding is added.
+Do not pass it as a workflow input, Docker argument, build secret, image layer,
+or test archive. App stdout remains private runner logging; the app must never
+print credentials.
+
+The agent writes `/e2e-results/agent-report.json` with exactly:
+
+```json
+{
+  "schemaVersion": 1,
+  "verdict": "passed",
+  "summary": "Completed the requested navigation checks.",
+  "checks": [
+    { "name": "navigation", "verdict": "passed", "evidence": "Expected page heading was visible." }
+  ]
+}
+```
+
+All fields are required. Verdicts are `passed`, `failed`, or `inconclusive`;
+summary/evidence are strings, names are nonempty strings, and checks is an
+array. Unknown keys at either level, invalid JSON, nonregular files/symlinks,
+and reports over 1 MiB are rejected with a generic error, failing the run
+without publishing that file. The exporter reconstructs only this public
+shape and redacts exact configured credential/CA strings from free text.
+The producer must still supply **public, sanitized text**: shape validation
+cannot identify arbitrary secrets embedded in prose. Never put raw model
+transcripts, browser auth/storage state, cookies, headers, or credentials in
+this report. Neither raw transcripts nor auth state are added to public exports.
+Existing private-artifact opt-ins are unchanged and remain sensitive.
+
+The sanitized report is exported as `results/<RUN_ID>/agent-report.json` and
+included in both run and combined workflow artifacts, also for normal nonzero
+test exits. A missing report is allowed and creates no placeholder; verdicts
+do not override the existing container/`execution.json` status contract. The
+agent API returns `1` when required checks/tools or its policy fail; the consumer
+Playwright test must assert the returned value is `0`, making its test exit fail.
+Publish the updated orchestrator image and pin both the reusable workflow
+revision and that image before consuming this optional interface.
+
 All three jobs select the caller repository environment named by the
 `environment` input (default `integration`), preserving its secret/variable
 scope and protection rules. Environment secrets override passed secrets with
@@ -399,7 +653,8 @@ matrix/report job. Existing application E2E images may remain on runtime
 `0.0.2`; this workflow change does not require migrating their compatible
 contract-1 launcher or publishing them again.
 
-An integration config has this shared schema (paths relative to this file):
+An integration config has this shared schema (paths relative to this file;
+editor schema: `orchestrator/config.schema.json`):
 
 ```json
 {
@@ -425,6 +680,47 @@ consumer, required `ORCHESTRATOR_IMAGE` repository variable, pinned local
 image commands, and publication order. `tests/orchestrator` is a minimal
 configuration-only consumer for image validation; the existing `tests/smoke`
 remains the inherited browser/runtime consumer.
+
+An optional `extends` selects another integration config, not an agent scenario
+config. For example, an agent lane reuses the deterministic lane's platform,
+matrix, component aliases, environment, and artifact policy without duplication:
+
+```json
+{
+  "schemaVersion": 1,
+  "extends": "./integration.config.json",
+  "test": {
+    "image": "ghcr.io/<owner>/<app>-e2e-agent:<immutable-tag>",
+    "script": "tests:agent",
+    "timeoutMs": 1800000
+  }
+}
+```
+
+Inheritance supports chains and replaces **whole top-level sections**; it does
+not deep-merge objects or concatenate arrays. Supplying `test` replaces all base
+test settings, so explicitly retain any required timeout or base URL. Omitted
+sections inherit; explicit values (including invalid/null values) replace and
+are validated normally. Each file requires `schemaVersion: 1`. Extended configs
+and their bases reject unknown top-level keys; standalone configs retain their
+existing tolerance. Missing files, invalid JSON, and cycles fail validation.
+`extends` resolves relative to the file declaring it. Inherited `platform.config`
+and matrix file paths retain their declaring file's directory, even when the
+child lives elsewhere; platform-internal paths still resolve from the platform
+file. Runtime secret-file options remain relative to the selected child config.
+The normalized runner config contains no `extends` field.
+
+All commands (`validate`, `matrix`, `run`, `run-matrix`, `serve`, `report`) use
+this same loader. The workflow stages the whole checkout, including base configs;
+keep all referenced configs/platform data inside that checkout for CI.
+The launcher sets `ONECX_CONFIG_SOURCE_ROOT` to the staged checkout: selected
+configs, inherited configs, platform files, and matrix files must stay within
+that directory, including after resolving symlinks. Direct local CLI calls
+remain unrestricted unless this optional boundary is set.
+Publish a **new** orchestrator image containing this loader before selecting an extended
+config, and pin the consuming workflow/image to that release. Already-published
+images do not gain inheritance support; do not overwrite existing release tags.
+Existing standalone configs and their runtime compatibility remain unchanged.
 
 The reusable workflow checks out the **caller** with checkout credential
 persistence disabled. It extracts the shared launcher from the explicitly
