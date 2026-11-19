@@ -5,7 +5,7 @@ FROM mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76c
 
 LABEL org.opencontainers.image.title="OneCX Playwright runtime" \
       org.opencontainers.image.description="Shared browser runtime; application lockfiles own test dependencies and authentication fixtures" \
-      org.opencontainers.image.version="0.0.4" \
+      org.opencontainers.image.version="0.0.5" \
       org.onecx.playwright.contract="1"
 
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
@@ -33,7 +33,7 @@ CMD ["tests:gui"]
 FROM runtime AS orchestrator
 LABEL org.opencontainers.image.title="OneCX integration orchestrator" \
       org.opencontainers.image.description="Shared integration CLI, Docker client and Java; no application tests" \
-      org.opencontainers.image.version="0.0.4-orchestrator" \
+      org.opencontainers.image.version="0.0.5-orchestrator" \
       org.onecx.playwright.contract="" \
       org.onecx.orchestrator.contract="1"
 
@@ -57,7 +57,7 @@ CMD ["--help"]
 FROM runtime AS agent-runtime
 LABEL org.opencontainers.image.title="OneCX shared browser agent runtime" \
       org.opencontainers.image.description="Reusable Claude and Playwright MCP browser agent; authenticated live-page fixture handoff" \
-      org.opencontainers.image.version="0.0.4-agent-runtime"
+      org.opencontainers.image.version="0.0.5-agent-runtime"
 
 WORKDIR /opt/onecx-agent
 COPY agent/package.json agent/package-lock.json ./

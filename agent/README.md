@@ -85,6 +85,10 @@ target ID, loader ID, and URL before/after model execution. It does not insert
 DOM markers, evaluate application code, reload, or navigate to prove identity.
 Its real-browser test verifies the existing DOM, sessionStorage and JavaScript
 memory survive MCP snapshot, click, and graceful disconnect.
+The MCP child runs in its private home and uses a relative Unix socket path to
+stay within the socket length limit, even when `OUTPUT_DIR` is deeply nested.
+On Unix, the output filesystem must support Unix-domain sockets; for example,
+WSL's Windows-mounted filesystem does not.
 
 Only `browser_snapshot`, `browser_click`, and `browser_wait_for` can be selected.
 The MCP shim filters advertised tools and rejects other calls; Claude also has

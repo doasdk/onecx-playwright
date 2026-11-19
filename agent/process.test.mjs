@@ -23,12 +23,13 @@ test('should return safe startup error when executable is missing', async () => 
   await assert.rejects(runProcess('definitely-not-an-installed-agent-executable', [], { env: process.env }), {
     message: 'Cannot start the installed agent process.'
   })
+})
 
-  test('should release cancellation listener when executable startup fails', async () => {
-    await assert.rejects(runProcess('definitely-not-an-installed-agent-executable', [], {
-      env: process.env, signal: new AbortController().signal
-    }), { message: 'Cannot start the installed agent process.' })
-  })
+test('should release cancellation listener when executable startup fails', async () => {
+  const controller = new AbortController()
+  await assert.rejects(runProcess('definitely-not-an-installed-agent-executable', [], {
+    env: process.env, signal: controller.signal
+  }), { message: 'Cannot start the installed agent process.' })
 })
 
 for (const stream of ['stdout', 'stderr']) {

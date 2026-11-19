@@ -21,7 +21,7 @@ async function execute(t, { script, input = '', allowed = '["browser_snapshot"]'
     env: {
       ...browserEnvironment(process.env, home),
       ...(allowed === null ? {} : { ONECX_AGENT_TOOLS: allowed }),
-      APP_PASSWORD: 'app-secret', ANTHROPIC_API_KEY: 'model-secret'
+      APP_PASSWORD: 'app-secret', ANTHROPIC_API_KEY: 'model-secret', CI: 'true'
     },
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true
@@ -39,10 +39,18 @@ async function execute(t, { script, input = '', allowed = '["browser_snapshot"]'
 }
 test('should remove model and application credentials when starting the MCP child', { timeout: 10_000 }, async (t) => {
   const result = await execute(t, {
-    script: `process.stdin.resume(); console.log(JSON.stringify({jsonrpc:'2.0',id:1,result:{model:process.env.ANTHROPIC_API_KEY??null,app:process.env.APP_PASSWORD??null,tools:process.env.ONECX_AGENT_TOOLS??null}}))`
+    script: `process.stdin.resume(); console.log(JSON.stringify({jsonrpc:'2.0',id:1,result:{model:process.env.ANTHROPIC_API_KEY??null,app:process.env.APP_PASSWORD??null,tools:process.env.ONECX_AGENT_TOOLS??null,ci:process.env.CI??null}}))`
   })
   assert.equal(result.code, 0)
-  assert.deepEqual(JSON.parse(result.stdout).result, { model: null, app: null, tools: null })
+  assert.deepEqual(JSON.parse(result.stdout).result, { model: null, app: null, tools: null, ci: null })
+})
+test('should place MCP sockets in the private home when starting a child', { timeout: 10_000 }, async (t) => {
+  const result = await execute(t, {
+    script: `process.stdin.resume(); console.log(JSON.stringify({jsonrpc:'2.0',id:1,result:{cwd:process.cwd(),home:process.env.HOME,sockets:process.env.PWTEST_SOCKETS_DIR??null}}))`
+  })
+  const child = JSON.parse(result.stdout).result
+  assert.equal(child.cwd.toLowerCase(), child.home.toLowerCase())
+  assert.equal(child.sockets, process.platform === 'win32' ? null : 's')
 })
 for (const allowed of [null, '[]', '["browser_navigate"]', '"browser_snapshot"']) {
   test(`should refuse MCP startup when the allowed tools value is ${allowed}`, { timeout: 10_000 }, async (t) => {

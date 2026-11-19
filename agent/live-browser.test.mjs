@@ -17,6 +17,15 @@ const require = createRequire(import.meta.url)
 let root
 let server
 let origin
+function toolFailure(result) {
+  const text = result.content?.map((item) => item.text || '').join('\n') || ''
+  if (/Socket directory path is too long/.test(text)) return 'MCP socket directory path is too long'
+  if (/ENOTSUP.*socket/.test(text)) return 'MCP socket is unsupported by the filesystem'
+  if (/Browser is already in use/.test(text)) return 'MCP browser profile is already in use'
+  if (/Executable doesn't exist/.test(text)) return 'MCP browser executable is missing'
+  return 'MCP tool returned an error; private details suppressed'
+}
+
 before(async () => {
   root = await mkdtemp(join(directory, '.test-live-'))
   server = createServer((_request, response) => {
@@ -42,9 +51,9 @@ test('should preserve authenticated memory and the exact tab when real pinned MC
         ? { executablePath: process.env.ONECX_AGENT_TEST_CHROMIUM_EXECUTABLE }
         : {})
     },
-    env: { ...process.env, OUTPUT_DIR: root }
+    env: { ...process.env, CI: 'true', OUTPUT_DIR: root }
   })
-  const home = join(root, '.mcp-home')
+  const home = join(root, `.mcp-home-${'x'.repeat(56)}`)
   await mkdir(home)
   let child
   try {
@@ -58,12 +67,19 @@ test('should preserve authenticated memory and the exact tab when real pinned MC
     const identity = await inspectLivePage(live.page, live.cdpEndpoint)
     const shim = join(directory, 'mcp-server.mjs')
     const mcp = join(dirname(require.resolve('@playwright/mcp/package.json')), 'cli.js')
+    const config = join(home, 'browser.json')
+    await writeFile(config, JSON.stringify({
+      browser: { browserName: 'chromium' },
+      webmcp: false,
+      console: { level: 'error' },
+      redactUrlParams: ['access_token', 'refresh_token', 'id_token', 'token', 'code', 'session_state']
+    }))
     child = spawn(process.execPath, [
       shim, mcp, '--cdp-endpoint', live.cdpEndpoint, '--allowed-origins', origin,
-      '--no-webmcp', '--codegen', 'none', '--output-dir', home
+      '--no-webmcp', '--console-level', 'error', '--codegen', 'none', '--config', config, '--output-dir', home
     ], {
       env: {
-        ...browserEnvironment(process.env, home),
+        ...browserEnvironment({ ...process.env, CI: 'true' }, home),
         ONECX_AGENT_TOOLS: JSON.stringify(['browser_snapshot', 'browser_click', 'browser_wait_for']),
         ANTHROPIC_AUTH_TOKEN: 'must-not-reach-browser'
       },
@@ -94,13 +110,13 @@ test('should preserve authenticated memory and the exact tab when real pinned MC
     assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), ['browser_click', 'browser_snapshot', 'browser_wait_for'])
     await assert.rejects(request('tools/call', { name: 'browser_navigate', arguments: { url: origin } }), /not permitted/)
     const snapshot = await request('tools/call', { name: 'browser_snapshot', arguments: {} })
-    assert.notEqual(snapshot.isError, true)
+    assert.notEqual(snapshot.isError, true, toolFailure(snapshot))
     const text = snapshot.content.map((item) => item.text || '').join('\n')
     assert.match(text, /Ready without a reload/)
     const ref = text.match(/button "Inspect session" \[ref=([^\]]+)\]/)?.[1]
     assert.ok(ref, 'snapshot exposes existing button reference')
     const clicked = await request('tools/call', { name: 'browser_click', arguments: { target: ref } })
-    assert.notEqual(clicked.isError, true, JSON.stringify(clicked))
+    assert.notEqual(clicked.isError, true, toolFailure(clicked))
     assert.equal(await live.page.locator('output').textContent(), 'authenticated:in-memory-sdk-state')
     assert.deepEqual(await inspectLivePage(live.page, live.cdpEndpoint), identity)
     const exited = once(child, 'exit')
@@ -115,6 +131,24 @@ test('should preserve authenticated memory and the exact tab when real pinned MC
     await rm(home, { recursive: true, force: true, maxRetries: 3 })
   }
   assert.deepEqual(await readdir(root), [])
+})
+
+for (const [text, expected] of [
+  ['Socket directory path is too long private-data', 'MCP socket directory path is too long'],
+  ['listen ENOTSUP private-data socket', 'MCP socket is unsupported by the filesystem'],
+  ['Browser is already in use private-data', 'MCP browser profile is already in use'],
+  ["Executable doesn't exist private-data", 'MCP browser executable is missing'],
+  ['unexpected private-data', 'MCP tool returned an error; private details suppressed']
+]) {
+  test(`should provide a safe diagnostic when MCP reports ${expected}`, () => {
+    assert.equal(toolFailure({ content: [{ text }] }), expected)
+  })
+}
+test('should provide a safe diagnostic when MCP omits error content', () => {
+  assert.equal(toolFailure({}), 'MCP tool returned an error; private details suppressed')
+})
+test('should provide a safe diagnostic when MCP error content omits text', () => {
+  assert.equal(toolFailure({ content: [{}] }), 'MCP tool returned an error; private details suppressed')
 })
 
 test('should remove the private profile when browser launch fails', async () => {

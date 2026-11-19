@@ -6,8 +6,14 @@ import { BROWSER_TOOLS } from './config.mjs'
 // Claude's MCP environment inherits its model credentials; the browser server must not.
 const allowed = JSON.parse(process.env.ONECX_AGENT_TOOLS || '[]')
 if (!Array.isArray(allowed) || !allowed.length || allowed.some((name) => !BROWSER_TOOLS.includes(name))) process.exit(1)
+// Playwright MCP binds a Unix socket even for CDP. A relative path avoids the
+// Unix socket length limit while keeping each server inside its private home.
 const child = spawn(process.execPath, process.argv.slice(2), {
-  env: browserEnvironment(process.env, process.env.HOME),
+  env: {
+    ...browserEnvironment(process.env, process.env.HOME),
+    ...(process.platform === 'win32' ? {} : { PWTEST_SOCKETS_DIR: 's' })
+  },
+  cwd: process.env.HOME,
   stdio: ['pipe', 'pipe', 'ignore'],
   windowsHide: true
 })
