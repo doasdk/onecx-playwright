@@ -122,6 +122,7 @@ test("should select the caller environment for secrets and variables in every jo
 
 test("should support explicit multi-registry auth without printing credentials", () => {
     const workflow = fs.readFileSync(path.join(root, ".github/workflows/integration.yml"), "utf8");
+    assert.match(workflow, /permissions:\s+contents: read\s+packages: read/);
     assert.match(workflow, /DOCKER_AUTH_CONFIG:\s+description:[^\n]+\s+required: false/);
     assert.equal((workflow.match(/printf '%s' "\$DOCKER_AUTH_CONFIG" > "\$DOCKER_CONFIG\/config.json"/g) || []).length, 3);
     assert.equal((workflow.match(/run: rm -f "\$DOCKER_CONFIG\/config.json"/g) || []).length, 3);

@@ -734,6 +734,11 @@ orchestrator uses Linux host networking, so platform import/probes can reach
 daemon-published service ports. Test/service container networking and aliases
 remain owned by the shared package; matrix/report use neither host networking
 nor the socket.
+For private GHCR images, both the caller and reusable workflow must declare
+`packages: read`; a reusable workflow cannot increase the caller's token
+permissions. Pass `github.actor` as `docker-username` and `secrets.GITHUB_TOKEN`
+as `docker-password`, and grant the caller repository Actions read access on
+each private package. A registry login alone does not verify package access.
 The selected matrix `runId` is passed as `RUN_ID` so report-index entries match
 the exported directories. `TMPDIR` also points inside the daemon-visible
 volume, keeping package-created secret/config scratch paths mountable.

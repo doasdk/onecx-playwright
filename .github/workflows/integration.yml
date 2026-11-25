@@ -58,6 +58,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 env:
   ORCHESTRATOR_IMAGE: ${{ inputs.orchestrator-image }}
