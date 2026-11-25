@@ -3,6 +3,10 @@ name: Reusable OneCX integration tests
 on:
   workflow_call:
     inputs:
+      runner:
+        description: Runner label(s) as a JSON string or array, e.g. '"ubuntu-24.04"' or '["self-hosted","linux"]'
+        type: string
+        default: '"ubuntu-24.04"'
       environment:
         description: Caller repository environment providing secrets, variables, and protection rules
         type: string
@@ -64,7 +68,7 @@ env:
 
 jobs:
   matrix:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(inputs.runner) }}
     environment: ${{ inputs.environment }}
     env:
       ORCHESTRATOR_IMAGE: ${{ inputs.orchestrator-image || vars.ORCHESTRATOR_IMAGE }}
@@ -118,7 +122,7 @@ jobs:
 
   run:
     needs: matrix
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(inputs.runner) }}
     environment: ${{ inputs.environment }}
     env:
       ORCHESTRATOR_IMAGE: ${{ inputs.orchestrator-image || vars.ORCHESTRATOR_IMAGE }}
@@ -193,7 +197,7 @@ jobs:
   report:
     if: always() && needs.matrix.result == 'success'
     needs: [matrix, run]
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(inputs.runner) }}
     environment: ${{ inputs.environment }}
     env:
       ORCHESTRATOR_IMAGE: ${{ inputs.orchestrator-image || vars.ORCHESTRATOR_IMAGE }}
