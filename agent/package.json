@@ -1,7 +1,7 @@
 {
   "name": "onecx-browser-agent",
   "private": true,
-  "version": "0.0.5",
+  "version": "0.0.6",
   "dependencies": {
     "@anthropic-ai/claude-code": "2.1.326",
     "@playwright/mcp": "0.0.85",
