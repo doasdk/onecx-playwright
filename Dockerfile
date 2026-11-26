@@ -5,7 +5,7 @@ FROM mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76c
 
 LABEL org.opencontainers.image.title="OneCX Playwright runtime" \
       org.opencontainers.image.description="Shared browser runtime; application lockfiles own test dependencies and authentication fixtures" \
-      org.opencontainers.image.version="0.0.3" \
+      org.opencontainers.image.version="0.0.6" \
       org.onecx.playwright.contract="1"
 
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
@@ -33,7 +33,7 @@ CMD ["tests:gui"]
 FROM runtime AS orchestrator
 LABEL org.opencontainers.image.title="OneCX integration orchestrator" \
       org.opencontainers.image.description="Shared integration CLI, Docker client and Java; no application tests" \
-      org.opencontainers.image.version="0.0.3-orchestrator" \
+      org.opencontainers.image.version="0.0.6-orchestrator" \
       org.onecx.playwright.contract="" \
       org.onecx.orchestrator.contract="1"
 
@@ -53,6 +53,19 @@ RUN sh -n workflow-launch.sh && chmod 755 workflow-launch.sh
 WORKDIR /work
 ENTRYPOINT ["node", "/opt/onecx-orchestrator/runner/index.mjs"]
 CMD ["--help"]
+
+FROM runtime AS agent-runtime
+LABEL org.opencontainers.image.title="OneCX shared browser agent runtime" \
+      org.opencontainers.image.description="Reusable Claude and Playwright MCP browser agent; authenticated live-page fixture handoff" \
+      org.opencontainers.image.version="0.0.6-agent-runtime"
+
+WORKDIR /opt/onecx-agent
+COPY agent/package.json agent/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund \
+    && FAIL_ON_MISSING_NATIVE=1 node node_modules/@anthropic-ai/claude-code/install.cjs
+COPY agent/ ./
+ENV PATH="/opt/onecx-agent/node_modules/.bin:${PATH}"
+WORKDIR /app/integration
 
 # Keep an unqualified docker build backwards-compatible with the runtime.
 FROM runtime AS default-runtime

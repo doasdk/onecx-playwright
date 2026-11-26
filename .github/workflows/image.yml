@@ -1,4 +1,4 @@
-name: Build and publish runtime and orchestrator
+name: Build and publish runtime, orchestrator and agent runtime
 
 on:
   pull_request:
@@ -33,6 +33,9 @@ jobs:
           for adapter in orchestrator/compatibility/patch-*.mjs; do node "$adapter"; done
           node --test orchestrator/runner/*.test.mjs
           node orchestrator/runner/index.mjs validate --config examples/next-app/integration/integration.config.json
+          npm ci --prefix agent --ignore-scripts --no-audit --no-fund
+          node agent/node_modules/playwright/cli.js install --with-deps chromium
+          node --test agent/*.test.mjs
       - uses: docker/setup-buildx-action@v3
       - name: Resolve image name
         id: image
@@ -73,6 +76,20 @@ jobs:
           docker run --rm \
             --mount "type=bind,src=$PWD/tests/orchestrator,dst=/consumer,readonly" \
             onecx-playwright:local-orchestrator matrix --config /consumer/integration.config.json --results /results
+      - name: Build shared agent runtime
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: agent-runtime
+          load: true
+          tags: onecx-playwright:local-agent-runtime
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Exercise inherited agent runtime contract
+        run: |
+          test "$(docker image inspect onecx-playwright:local-agent-runtime --format '{{index .Config.Labels "org.onecx.playwright.contract"}}')" = 1
+          test "$(docker image inspect onecx-playwright:local-agent-runtime --format '{{json .Config.Entrypoint}}')" = '["/opt/onecx-playwright/entrypoint.sh"]'
+          docker run --rm onecx-playwright:local-agent-runtime sh -c 'test -f /opt/onecx-agent/run.mjs && claude --version && node /opt/onecx-agent/node_modules/@playwright/mcp/cli.js --version'
       - name: Check release version
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
@@ -81,6 +98,8 @@ jobs:
           test "${GITHUB_REF_NAME#v}" = "$version"
           orchestrator_version=$(docker image inspect onecx-playwright:local-orchestrator --format '{{index .Config.Labels "org.opencontainers.image.version"}}')
           test "$orchestrator_version" = "$version-orchestrator"
+          agent_version=$(docker image inspect onecx-playwright:local-agent-runtime --format '{{index .Config.Labels "org.opencontainers.image.version"}}')
+          test "$agent_version" = "$version-agent-runtime"
       - uses: docker/metadata-action@v5
         id: metadata
         with:
@@ -114,6 +133,27 @@ jobs:
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha
+          provenance: true
+          sbom: true
+      - uses: docker/metadata-action@v5
+        id: agent-metadata
+        with:
+          images: ${{ steps.image.outputs.name }}
+          flavor: latest=false,suffix=-agent-runtime
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+      - name: Publish validated agent runtime
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: agent-runtime
+          push: true
+          tags: ${{ steps.agent-metadata.outputs.tags }}
+          labels: ${{ steps.agent-metadata.outputs.labels }}
           cache-from: type=gha
           provenance: true
           sbom: true

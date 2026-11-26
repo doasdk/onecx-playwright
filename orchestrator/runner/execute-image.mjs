@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import { clearTimeout, setTimeout } from 'node:timers'
 import { executionContract, executionStatus, runtimeEnvelope } from './image-execution-contract.mjs'
+import { validateAgentConfig } from './agent-contract.mjs'
 
 export async function executeImage(options, dependencies = {}) {
   const docker =
@@ -24,6 +25,7 @@ export async function executeImage(options, dependencies = {}) {
     environment,
     script,
     capture,
+    agentConfig,
     secretDir,
     runDir,
     alias,
@@ -40,12 +42,20 @@ export async function executeImage(options, dependencies = {}) {
   const input = join(secretDir, 'runtime.json')
   const labels = JSON.parse(docker(['image', 'inspect', '--format', '{{json .Config.Labels}}', image]))
   const contract = executionContract(labels || {})
-  const inputOptions = { metadata, environments, data, environment, script, capture }
-  writeFileSync(input, JSON.stringify(contract === '1' ? runtimeEnvelope(inputOptions) : inputOptions), { mode: 0o600 })
+  if (agentConfig !== undefined) {
+    try {
+      validateAgentConfig(JSON.parse(agentConfig))
+    } catch {
+      throw new Error('AGENT_CONFIG_JSON must contain a valid agent configuration.')
+    }
+  }
+  const inputOptions = { metadata, environments, data, environment, script, capture,
+    ...(agentConfig === undefined ? {} : { agentConfig }) }
   const output = join(runDir, 'e2e-results', alias)
-  mkdirSync(output, { recursive: true })
   let created = false
   try {
+    writeFileSync(input, JSON.stringify(contract === '1' ? runtimeEnvelope(inputOptions) : inputOptions), { mode: 0o600 })
+    mkdirSync(output, { recursive: true })
     if (contract === 'legacy') {
       console.warn('Legacy E2E image: using compatibility bootstrap. Rebuild with OneCX runtime contract v1.')
     }
@@ -72,6 +82,7 @@ export async function executeImage(options, dependencies = {}) {
       onImageVerified?.()
     }
     docker(['cp', input, `${name}:/tmp/onecx-runtime.json`])
+    rmSync(input, { force: true })
     if (contract === 'legacy') {
       docker([
         'cp',
@@ -110,7 +121,7 @@ export async function executeImage(options, dependencies = {}) {
     const manifestPath = join(output, 'execution.json')
     const manifest = contract === '1' && !timedOut ? JSON.parse(readFileSync(manifestPath, 'utf8')) : undefined
     const status = executionStatus(state.ExitCode, timedOut, manifest, contract)
-    if (capture && existsSync(logPath)) copyFileSync(logPath, join(output, 'container.log'))
+    if (capture && agentConfig === undefined && existsSync(logPath)) copyFileSync(logPath, join(output, 'container.log'))
     return [
       {
         networkAlias: alias,
@@ -125,7 +136,12 @@ export async function executeImage(options, dependencies = {}) {
       },
     ]
   } finally {
-    onContainer?.(undefined)
-    if (created) docker(['rm', '-f', name])
+    try {
+      rmSync(input, { force: true })
+      if (agentConfig !== undefined) rmSync(join(secretDir, 'e2e.log'), { force: true })
+    } finally {
+      onContainer?.(undefined)
+      if (created) docker(['rm', '-f', name])
+    }
   }
 }

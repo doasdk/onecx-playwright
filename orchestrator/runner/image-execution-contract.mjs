@@ -7,7 +7,7 @@ export function executionContract(labels = {}) {
   return '1'
 }
 
-export function runtimeEnvelope({ metadata, environments, data, environment, script, capture }) {
+export function runtimeEnvelope({ metadata, environments, data, environment, script, capture, agentConfig }) {
   return {
     version: 1,
     script,
@@ -22,6 +22,7 @@ export function runtimeEnvelope({ metadata, environments, data, environment, scr
       TLS_CA_CERT_PATH: '/tmp/onecx-ca.pem',
       OUTPUT_DIR: '/e2e-results',
       CAPTURE_PRIVATE_ARTIFACTS: String(capture),
+      ...(agentConfig === undefined ? {} : { AGENT_CONFIG_JSON: agentConfig }),
     },
   }
 }

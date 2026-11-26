@@ -2,20 +2,20 @@ import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { setImmediate } from 'node:timers'
 import test from 'node:test'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { executeImage } from './execute-image.mjs'
 import { runtimeContractLabel, runtimeEnvelope } from './image-execution-contract.mjs'
 
 async function execute(overrides = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'onecx-it-executor-'))
+  const root = mkdtempSync(join(import.meta.dirname, '.test-executor-'))
   const secretDir = join(root, 'private')
   const runDir = join(root, 'work')
   mkdirSync(secretDir)
   mkdirSync(join(runDir, 'e2e'), { recursive: true })
   writeFileSync(join(runDir, 'e2e', 'ca.pem'), 'private-ca')
   const calls = []
+  let runtime
   let child
   const docker = (args) => {
     calls.push(args)
@@ -24,6 +24,10 @@ async function execute(overrides = {}) {
       return JSON.stringify(labels)
     }
     if (args[0] === 'create' && overrides.createError) throw new Error('container create failed')
+    if (args[0] === 'cp' && args[1] === join(secretDir, 'runtime.json')) {
+      runtime = JSON.parse(readFileSync(args[1], 'utf8'))
+      if (overrides.runtimeCopyError) throw new Error('runtime copy failed')
+    }
     if (args[0] === 'kill') {
       if (overrides.killError) throw new Error('container kill failed')
       setImmediate(() => child.emit('exit', 137))
@@ -64,6 +68,7 @@ async function execute(overrides = {}) {
         environment: 'custom',
         script: 'tests:gui',
         capture: !!overrides.capture,
+        ...(overrides.agentConfig === undefined ? {} : { agentConfig: overrides.agentConfig }),
         secretDir,
         runDir,
         alias: 'custom-e2e',
@@ -77,11 +82,13 @@ async function execute(overrides = {}) {
       },
       { docker, spawn }
     )
-    return { records, calls, runtime: JSON.parse(readFileSync(join(secretDir, 'runtime.json'), 'utf8')) }
+    return { records, calls, runtime, logCaptured: existsSync(join(runDir, 'e2e-results', 'custom-e2e', 'container.log')) }
   } catch (error) {
     error.calls = calls
     throw error
   } finally {
+    assert.equal(existsSync(join(secretDir, 'runtime.json')), false, 'Credential-bearing runtime envelope must be removed.')
+    if (overrides.agentConfig !== undefined) assert.equal(existsSync(join(secretDir, 'e2e.log')), false)
     rmSync(root, { recursive: true, force: true })
   }
 }
@@ -119,6 +126,39 @@ test('should run the selected image through the inherited entrypoint', async () 
   assert.ok(calls.some(([name]) => name === 'image-verified'))
   assert.ok(calls.some(([name, path]) => name === 'cp' && path.endsWith('ca.pem')))
   assert.equal(calls.at(-1)[0], 'rm')
+})
+
+for (const legacy of [false, true]) {
+  test(`should forward only explicit agent configuration privately for legacy=${legacy}`, async () => {
+    const agentConfig = JSON.stringify({
+      anthropicBaseUrl: 'https://model-gateway.example', model: 'test-model', authToken: 'private-agent-token',
+    })
+    const { calls, runtime } = await execute({ legacy, agentConfig })
+    assert.equal(legacy ? runtime.agentConfig : runtime.environment.AGENT_CONFIG_JSON, agentConfig)
+    assert.doesNotMatch(JSON.stringify(calls), /private-agent-token/)
+  })
+}
+
+for (const legacy of [false, true]) {
+  for (const options of [{}, { timeout: true, noManifest: true, exitCode: 137 }, { createError: true },
+    { runtimeCopyError: true }, { spawnError: true }, { copyError: true }]) {
+    test(`should remove provider envelopes and suppress raw captured logs for legacy=${legacy} options=${JSON.stringify(options)}`, async () => {
+      const agentConfig = JSON.stringify({
+        anthropicBaseUrl: 'https://model.example', model: 'test', apiKey: 'private-provider-token'
+      })
+      const execution = execute({ legacy, capture: true, agentConfig, ...options })
+      if (options.createError || options.runtimeCopyError || options.spawnError || options.copyError) {
+        await assert.rejects(execution)
+      } else {
+        assert.equal((await execution).logCaptured, false)
+      }
+    })
+  }
+}
+
+test('should reject invalid agent configuration without exposing values', async () => {
+  await assert.rejects(execute({ agentConfig: 'private-invalid-json' }),
+    /^Error: AGENT_CONFIG_JSON must contain a valid agent configuration\.$/)
 })
 
 test('should preserve opaque runtime configuration when running an older image', async () => {

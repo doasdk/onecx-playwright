@@ -34,7 +34,7 @@ export function imageVersion(image, repository, prefix = '') {
 export function loadVersions(root) {
   const config = readJson(root, 'versions.json')
   if (!config || Array.isArray(config) || typeof config !== 'object') throw new Error('Invalid versions.json: expected an object')
-  for (const key of ['release', 'integrationTests', 'allure']) validateVersion(config[key], key)
+  for (const key of ['release', 'integrationTests', 'allure', 'claudeCode', 'playwrightMcp']) validateVersion(config[key], key)
   const node = imageVersion(config.nodeImage, 'node')
   const playwright = imageVersion(config.playwrightImage, 'mcr.microsoft.com/playwright', 'v')
   const baseline = readJson(root, 'orchestrator/compatibility/compatibility.json')
@@ -51,6 +51,10 @@ export function generatedFiles(root, versions) {
   orchestrator.dependencies['allure-commandline'] = versions.allure
   const smoke = readJson(root, 'tests/smoke/package.json')
   smoke.devDependencies['@playwright/test'] = versions.playwright
+  const agent = readJson(root, 'agent/package.json')
+  agent.version = versions.release
+  agent.dependencies['@anthropic-ai/claude-code'] = versions.claudeCode
+  agent.dependencies['@playwright/mcp'] = versions.playwrightMcp
   const template = readFileSync(join(root, 'scripts/Dockerfile.template'), 'utf8').replace(/\r\n/g, '\n')
   const dockerfile = template.replace(/\{\{(\w+)\}\}/g, (_, key) => {
     if (!Object.hasOwn(versions, key)) throw new Error(`Unknown Dockerfile template variable: ${key}`)
@@ -60,7 +64,8 @@ export function generatedFiles(root, versions) {
     Dockerfile: dockerfile,
     '.node-version': `${versions.node}\n`,
     'orchestrator/package.json': json(orchestrator),
-    'tests/smoke/package.json': json(smoke)
+    'tests/smoke/package.json': json(smoke),
+    'agent/package.json': json(agent)
   }
 }
 
@@ -120,7 +125,7 @@ export function synchronize(root, { check = false, install = installLock } = {})
     if (file.endsWith('/package.json')) changedManifests.push(dirname(file))
   }
   for (const directory of changedManifests) install(root, directory)
-  for (const directory of ['orchestrator', 'tests/smoke']) checkLock(root, directory)
+  for (const directory of ['orchestrator', 'tests/smoke', 'agent']) checkLock(root, directory)
 }
 
 export function main(args, root = defaultRoot, install = installLock) {

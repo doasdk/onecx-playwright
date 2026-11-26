@@ -80,6 +80,12 @@ test("should override the image CI default for local execution", () => {
   assert.match(result.log, /-e CI= /);
 });
 
+test("should confine configuration files to the staged checkout when invoking the orchestrator", () => {
+  const result = run("matrix");
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.log, /-e ONECX_CONFIG_SOURCE_ROOT=\/var\/lib\/docker\/volumes\/test-volume\/_data\/source/);
+});
+
 test("should preserve CI mode for pipeline execution", () => {
   const result = run("run", { CI: "true" });
   assert.equal(result.status, 0, result.stderr);
@@ -117,6 +123,32 @@ test("should copy opaque secret files without placing values in Docker arguments
     assert.equal(fs.existsSync(path.join(result.root, ".onecx-ci", state, "environments.json")), false);
     assert.equal(fs.existsSync(path.join(result.root, ".onecx-ci", state, "data.json")), false);
   }
+});
+
+test("should stage optional agent configuration privately and remove its local file", () => {
+  const result = run("run", { AGENT_CONFIG_JSON: '{"authToken":"private-agent-token"}' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.log, /-e AGENT_CONFIG_JSON_FILE=.*\/secrets\/agent-config.json/);
+  assert.match(result.log, /cp .*agent-config.json test-container:.*\/secrets\/agent-config.json/);
+  assert.doesNotMatch(result.log + result.stdout + result.stderr, /private-agent-token/);
+  const states = fs.readdirSync(path.join(result.root, ".onecx-ci")).filter((name) => name.startsWith("launch."));
+  for (const state of states) {
+    assert.equal(fs.existsSync(path.join(result.root, ".onecx-ci", state, "agent-config.json")), false);
+  }
+});
+
+for (const mode of ["matrix", "report"]) {
+  test(`should not forward agent configuration during ${mode}`, () => {
+    const result = run(mode, { AGENT_CONFIG_JSON: "private-agent-token" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.log + result.stdout + result.stderr, /AGENT_CONFIG_JSON|agent-config.json|private-agent-token/);
+  });
+}
+
+test("should not add agent settings when the optional secret is absent", () => {
+  const result = run("run", { AGENT_CONFIG_JSON: "" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.log, /AGENT_CONFIG_JSON|agent-config.json/);
 });
 
 test("should export results and clean containers and volumes when execution fails", () => {

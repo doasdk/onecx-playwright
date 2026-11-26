@@ -9,3 +9,14 @@
 !orchestrator/runner/**
 !orchestrator/compatibility/
 !orchestrator/compatibility/**
+!agent/
+!agent/**
+agent/node_modules/
+agent/**/node_modules/
+agent/*.test.mjs
+agent/**/*.test.mjs
+agent/*.test.cjs
+agent/**/*.test.cjs
+agent/tests/
+agent/**/tests/
+agent/**/.agent-test-*/

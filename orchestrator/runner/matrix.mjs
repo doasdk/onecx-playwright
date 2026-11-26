@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { Buffer } from 'node:buffer'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { URL } from 'node:url'
+import { assertConfigSourcePath, loadConfigSource } from './config-source.mjs'
 
 export function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -114,18 +115,17 @@ function validateComponents(source, platformConfig) {
   return source
 }
 
-function loadJsonFile(file, label) {
+function loadJsonFile(file, label, sourceRoot) {
   if (!existsSync(file)) throw new Error(`${label} file does not exist: ${file}`)
+  assertConfigSourcePath(file, sourceRoot)
   return parseJson(readFileSync(file, 'utf8'), label)
 }
 
 export function loadConfig(configPath, env = process.env) {
   if (typeof configPath !== 'string' || !configPath.trim()) throw new Error('Specify --config <path>.')
   const absoluteConfigPath = isAbsolute(configPath) ? configPath : resolve(process.cwd(), configPath)
-  const config = loadJsonFile(absoluteConfigPath, 'Orchestrator configuration')
-  if (!isRecord(config) || config.schemaVersion !== 1) {
-    throw new Error('Configuration must be an object with schemaVersion: 1.')
-  }
+  const sourceRoot = env.ONECX_CONFIG_SOURCE_ROOT
+  const { config, origins } = loadConfigSource(absoluteConfigPath, [], false, sourceRoot)
   if (!isRecord(config.platform) || typeof config.platform.config !== 'string' || !config.platform.config.trim()) {
     throw new Error('Configuration.platform.config must name a platform JSON file.')
   }
@@ -133,8 +133,8 @@ export function loadConfig(configPath, env = process.env) {
   const configDirectory = dirname(absoluteConfigPath)
   const platformPath = isAbsolute(config.platform.config)
     ? config.platform.config
-    : resolve(configDirectory, config.platform.config)
-  const platformFile = loadJsonFile(platformPath, 'Platform configuration')
+    : resolve(origins.platform, config.platform.config)
+  const platformFile = loadJsonFile(platformPath, 'Platform configuration', sourceRoot)
   if (!isRecord(platformFile) || !isRecord(platformFile.platformConfig)) {
     throw new Error('Platform configuration must contain a platformConfig object.')
   }
@@ -145,8 +145,8 @@ export function loadConfig(configPath, env = process.env) {
   let matrix = config.matrix
   let matrixPath
   if (typeof matrix === 'string') {
-    matrixPath = isAbsolute(matrix) ? matrix : resolve(configDirectory, matrix)
-    matrix = loadJsonFile(matrixPath, 'Version matrix')
+    matrixPath = isAbsolute(matrix) ? matrix : resolve(origins.matrix, matrix)
+    matrix = loadJsonFile(matrixPath, 'Version matrix', sourceRoot)
   }
   if (matrix !== undefined && (!isRecord(matrix) || Object.keys(matrix).length === 0)) {
     throw new Error('Configuration.matrix must be a non-empty object or a path to a matrix JSON file.')
